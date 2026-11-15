@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Order Tracker — Shipping Dashboard</title>
+
+  <!-- Tailwind CSS (Play CDN) -->
+  <script>
+    (function () {
+      const origWarn = console.warn;
+      console.warn = function (...args) {
+        if (typeof args[0] === "string" && args[0].includes("cdn.tailwindcss.com should not be used in production")) return;
+        return origWarn.apply(console, args);
+      };
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts: Outfit + Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["Inter", "sans-serif"],
+            display: ["Outfit", "sans-serif"],
+          },
+          colors: {
+            cream: {
+              50: "#FDFBF7",
+              100: "#F8F4EC",
+              200: "#EFE8D8",
+            },
+            lavender: {
+              50: "#F7F5FF",
+              100: "#EFEBFF",
+              200: "#DFD7FF",
+              500: "#8B7AE8",
+              600: "#725EE0",
+              700: "#5A46C7",
+            },
+            peach: {
+              50: "#FFF6F3",
+              100: "#FFECE5",
+              200: "#FFD6C7",
+              500: "#F27D61",
+              600: "#E06346",
+            },
+            sage: {
+              50: "#F3FAF6",
+              100: "#E5F5EC",
+              200: "#C8EBD8",
+              600: "#358562",
+              700: "#27684B",
+            },
+            amber: {
+              50: "#FFFBEB",
+              100: "#FEF3C7",
+              200: "#FDE68A",
+              500: "#F59E0B",
+              600: "#D97706",
+              700: "#B45309",
+            },
+          },
+          boxShadow: {
+            soft: "0 10px 30px -10px rgba(38, 34, 62, 0.08)",
+            tactile: "0 4px 0 0 rgba(30, 27, 46, 0.14)",
+            "tactile-primary": "0 4px 0 0 #533EC2",
+            "tactile-peach": "0 4px 0 0 #BF482C",
+            "tactile-sage": "0 4px 0 0 #1E543D",
+            "tactile-amber": "0 4px 0 0 #B45309",
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body class="min-h-screen antialiased selection:bg-lavender-200 selection:text-slate-900 pb-10">
+
+  <input type="file" id="csvFile" accept=".csv,text/csv" class="hidden" />
+  <datalist id="pdfSuggestions"></datalist>
+
+  <!-- ===================================================================== -->
+  <!-- HEADER                                                                -->
+  <!-- ===================================================================== -->
+  <header class="sticky top-0 z-30 glass-card border-b border-lavender-200/70 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3.5">
+
+        <!-- Brand -->
+        <div class="flex items-center gap-3">
+          <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-lavender-600 via-purple-500 to-peach-500 flex items-center justify-center text-white shadow-md rotate-[-3deg] hover:rotate-0 transition-transform">
+            <i data-lucide="package" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <h1 class="font-display font-extrabold text-2xl tracking-tight text-slate-900">
+                Order Tracker
+              </h1>
+              <span class="px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider rounded-full bg-peach-100 text-peach-600 border border-peach-200">
+                v1.9
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 font-medium">
+              Shipping dashboard · Wolfsteel &amp; NAC · CSV + PDF linked
+            </p>
+          </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="saveIndicator" class="text-sage-700">Saved ✓</span>
+
+          <button id="undoBtn" onclick="undo()" disabled
+            class="btn-trendy inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-white text-slate-700 border border-slate-200 shadow-tactile hover:bg-cream-100"
+            title="Undo last change">
+            <i data-lucide="undo-2" class="w-4 h-4 text-lavender-600"></i>
+            <span class="toolbar-label">Undo</span>
+            <span id="undoCountBadge" class="hidden text-[11px] px-1.5 py-0.5 rounded-md bg-lavender-100 text-lavender-700 font-extrabold">0</span>
+          </button>
+
+          <button onclick="openCSV()"
+            class="btn-trendy inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-white text-slate-700 border border-slate-200 shadow-tactile hover:bg-cream-100">
+            <i data-lucide="upload" class="w-4 h-4 text-lavender-600"></i>
+            <span class="toolbar-label">Import CSV</span>
+          </button>
+
+          <button onclick="exportCSV()"
+            class="btn-trendy inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-sage-100 text-sage-700 border border-sage-200 shadow-tactile-sage hover:bg-sage-50">
+            <i data-lucide="download" class="w-4 h-4"></i>
+            <span class="toolbar-label">Export CSV</span>
+          </button>
+
+          <button onclick="linkAutoSaveCsv()"
+            class="btn-trendy inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-white text-slate-700 border border-slate-200 shadow-tactile hover:bg-cream-100"
+            title="Pick a CSV file to overwrite automatically on every change">
+            <i data-lucide="hard-drive" class="w-4 h-4 text-sage-600"></i>
+            <span class="toolbar-label">Link Auto-CSV</span>
+          </button>
+          <span id="autoSaveStatus" class="hidden sm:inline text-xs text-slate-400">Auto-CSV: off</span>
+
+          <button onclick="selectPDFFolder()"
+            class="btn-trendy inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-white text-slate-700 border border-slate-200 shadow-tactile hover:bg-cream-100"
+            title="Scans selected folder and all subfolders for PDFs">
+            <i data-lucide="folder-open" class="w-4 h-4 text-teal-600"></i>
+            <span class="toolbar-label">PDF Folder</span>
+          </button>
+          <span id="pdfStatus" class="hidden sm:inline text-xs">No PDF folder selected</span>
+
+          <button onclick="manualSave()"
+            class="btn-trendy inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-lavender-100 text-lavender-700 border border-lavender-200 shadow-tactile-primary hover:bg-lavender-50">
+            <i data-lucide="save" class="w-4 h-4"></i>
+            <span class="toolbar-label">Save</span>
+          </button>
+
+          <button onclick="toggleDarkMode()"
+            class="btn-trendy inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold bg-white text-slate-700 border border-slate-200 shadow-tactile hover:bg-cream-100"
+            title="Toggle dark mode">
+            <i data-lucide="moon" class="w-4 h-4 text-slate-600"></i>
+          </button>
+
+          <button id="densityBtn" onclick="toggleDensity()"
+            class="btn-trendy inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold bg-white text-slate-700 border border-slate-200 shadow-tactile hover:bg-cream-100"
+            title="Toggle compact density">
+            <i data-lucide="rows-3" class="w-4 h-4 text-slate-600"></i>
+            <span class="toolbar-label" id="densityLabel">Compact</span>
+          </button>
+
+          <div class="relative">
+            <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"></i>
+            <input id="searchBox" type="search" placeholder="Search orders…"
+              class="pl-9 pr-3 py-2 rounded-xl text-sm border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-lavender-500/40 w-40 sm:w-56"
+              oninput="render()" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 space-y-6">
+
+    <!-- Stats -->
+    <section class="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div class="glass-card rounded-2xl p-4 shadow-soft flex items-center justify-between border border-lavender-200/80">
+        <div>
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Ongoing</p>
+          <p id="statOngoing" class="font-display text-3xl font-extrabold text-lavender-600 mt-0.5">0</p>
+        </div>
+        <div class="w-11 h-11 rounded-2xl bg-lavender-100 text-lavender-600 flex items-center justify-center shrink-0">
+          <i data-lucide="clipboard-list" class="w-5 h-5"></i>
+        </div>
+      </div>
+      <div class="glass-card rounded-2xl p-4 shadow-soft flex items-center justify-between border border-rose-200/80">
+        <div>
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Overdue</p>
+          <p id="statOverdue" class="font-display text-3xl font-extrabold text-red-600 mt-0.5">0</p>
+        </div>
+        <div class="w-11 h-11 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+          <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+        </div>
+      </div>
+      <div class="glass-card rounded-2xl p-4 shadow-soft flex items-center justify-between border border-amber-200/80">
+        <div>
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Priority</p>
+          <p id="statPriority" class="font-display text-3xl font-extrabold text-amber-600 mt-0.5">0</p>
+        </div>
+        <div class="w-11 h-11 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+          <i data-lucide="flag" class="w-5 h-5"></i>
+        </div>
+      </div>
+      <div class="glass-card rounded-2xl p-4 shadow-soft flex items-center justify-between border border-peach-200/80">
+        <div>
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Partial</p>
+          <p id="statPartial" class="font-display text-3xl font-extrabold text-peach-600 mt-0.5">0</p>
+        </div>
+        <div class="w-11 h-11 rounded-2xl bg-peach-100 text-peach-600 flex items-center justify-center shrink-0">
+          <i data-lucide="split" class="w-5 h-5"></i>
+        </div>
+      </div>
+      <div class="glass-card rounded-2xl p-4 shadow-soft flex items-center justify-between border border-sage-200/80">
+        <div>
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Shipped this week</p>
+          <p id="statShipped" class="font-display text-3xl font-extrabold text-sage-700 mt-0.5">0</p>
+        </div>
+        <div class="w-11 h-11 rounded-2xl bg-sage-100 text-sage-600 flex items-center justify-center shrink-0">
+          <i data-lucide="truck" class="w-5 h-5"></i>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ship-by day counts -->
+    <section class="glass-card rounded-2xl p-4 shadow-soft border border-lavender-200/50">
+      <div class="flex items-center gap-2 mb-2">
+        <i data-lucide="calendar-days" class="w-4 h-4 text-lavender-600"></i>
+        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500">Ship-by day</h3>
+      </div>
+      <div id="shipByDayStrip" class="flex flex-wrap gap-2">
+        <span class="text-xs text-slate-400">No ongoing orders</span>
+      </div>
+    </section>
+
+    <!-- Add Order -->
+    <section class="glass-card rounded-2xl p-5 shadow-soft border border-lavender-200/60">
+      <h2 class="font-display font-bold text-lg text-slate-800 mb-4 flex items-center gap-2">
+        <i data-lucide="plus-circle" class="w-5 h-5 text-lavender-600"></i>
+        Add Order
+      </h2>
+      <div class="flex flex-wrap items-end gap-3">
+        <label class="flex items-center gap-2 text-sm font-semibold text-slate-600 cursor-pointer select-none">
+          <input type="checkbox" id="newPriority" class="rounded border-slate-300 text-lavender-600 focus:ring-lavender-500" />
+          Priority
+        </label>
+        <div>
+          <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Due Date</label>
+          <input type="date" id="newDueDate"
+            class="px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-lavender-500/40" />
+        </div>
+        <div>
+          <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">W/N</label>
+          <select id="newWN"
+            class="px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-lavender-500/40">
+            <option value="Wolfsteel">Wolfsteel</option>
+            <option value="NAC">NAC</option>
+          </select>
+        </div>
+        <div class="flex-1 min-w-[200px]">
+          <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Part Number</label>
+          <input id="newPart" type="text" placeholder="Part # or search PDF…" list="pdfSuggestions"
+            autocomplete="off"
+            oninput="onPartInput(this)"
+            class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-lavender-500/40" />
+        </div>
+        <div>
+          <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Qty</label>
+          <input type="number" id="newQty" min="1" value="1"
+            class="w-20 px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-lavender-500/40" />
+        </div>
+        <button onclick="addOrder()"
+          class="btn-trendy inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-lavender-600 text-white shadow-tactile-primary hover:bg-lavender-700">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+          Add Order
+        </button>
+      </div>
+    </section>
+
+    <!-- Ongoing Orders -->
+    <section class="glass-card rounded-2xl shadow-soft border border-lavender-200/60 overflow-hidden">
+      <div class="px-5 py-4 border-b border-cream-200/80 flex items-center justify-between">
+        <h2 class="font-display font-bold text-lg text-slate-800 flex items-center gap-2">
+          <i data-lucide="list-checks" class="w-5 h-5 text-lavender-600"></i>
+          Ongoing Orders
+        </h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="tracker-table w-full">
+          <thead>
+            <tr>
+              <th class="text-center">Pri</th>
+              <th class="text-center">Done</th>
+              <th class="text-center">St</th>
+              <th>Due Date</th>
+              <th>W/N</th>
+              <th>Part #</th>
+              <th>Qty</th>
+              <th>Ship</th>
+              <th>Partial</th>
+              <th>Scrap</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="ongoingTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Shipped & History -->
+    <section class="glass-card rounded-2xl shadow-soft border border-sage-200/60 overflow-hidden">
+      <div class="px-5 py-4 border-b border-cream-200/80 flex items-center justify-between">
+        <h2 class="font-display font-bold text-lg text-slate-800 flex items-center gap-2">
+          <i data-lucide="package-check" class="w-5 h-5 text-sage-600"></i>
+          Shipped this week
+        </h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="tracker-table w-full">
+          <thead>
+            <tr>
+              <th class="text-center">Pri</th>
+              <th class="text-center">Status</th>
+              <th>Due Date</th>
+              <th>Shipped</th>
+              <th>W/N</th>
+              <th>Part #</th>
+              <th>Qty</th>
+              <th>Return</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="shippedTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="text-center text-xs text-slate-400 pb-6">
+      Data is stored in your browser’s localStorage · Export CSV for backups
+    </p>
+  </main>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
