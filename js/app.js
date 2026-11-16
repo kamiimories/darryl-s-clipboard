@@ -1198,57 +1198,151 @@ async function exportCSV() {
   URL.revokeObjectURL(url);
 }
 
-function processCSVContent(content, filename = "OrderTracker") {
-  saveState();
-  importedFileName = filename.replace(/\.[^/.]+$/, "").replace(/_\d{4}-\d{2}-\d{2}_\d{4}$/, "");
+function parseCsvRow(rowStr) {
+  const values = [];
+  let inQuotes = false;
+  let currentVal = "";
+  for (const char of rowStr) {
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      values.push(currentVal);
+      currentVal = "";
+    } else {
+      currentVal += char;
+    }
+  }
+  values.push(currentVal);
+  return values;
+}
 
-  if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
+function stripQuotes(s) {
+  return String(s || "")
+    .replace(/^"|"$/g, "")
+    .trim();
+}
 
-  const rows = content.trim().split(/\r?\n/);
-  if (rows.length <= 1) return;
+function parsePriorityFlag(v) {
+  const s = String(v || "")
+    .trim()
+    .toLowerCase();
+  return s === "yes" || s === "true" || s === "1";
+}
 
-  ongoingOrders = [];
-  shippedOrders = [];
+function parseDoneFlag(v) {
+  const s = String(v || "")
+    .trim()
+    .toLowerCase();
+  return s === "yes" || s === "true" || s === "1";
+}
+
+/** Detect legacy schema: table,priority,done,dueDate,shippedDate,wn,partNo,qty */
+function isLegacyCsvHeader(headerCells) {
+  const h = headerCells.map((c) => stripQuotes(c).toLowerCase());
+  const joined = h.join(",");
+  // Classic Nov 2026-style export
+  if (h[0] === "table" && h.includes("duedate") && h.includes("partno") && h.includes("qty")) {
+    return true;
+  }
+  // Heuristic: short header without Event Type / Original Quantity
+  if (
+    h[0] === "table" &&
+    !joined.includes("event type") &&
+    !joined.includes("eventtype") &&
+    !joined.includes("original quantity") &&
+    !joined.includes("originalquantity")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function processLegacyCSV(rows) {
+  // rows[0] = header; data from 1..
+  const header = parseCsvRow(rows[0]).map((c) => stripQuotes(c).toLowerCase());
+  const idx = (name) => header.indexOf(name);
+
+  const iTable = idx("table");
+  const iPriority = idx("priority");
+  const iDone = idx("done");
+  const iDue = idx("duedate");
+  const iShipped = idx("shippeddate");
+  const iWn = idx("wn");
+  const iPart = idx("partno");
+  const iQty = idx("qty");
 
   for (let i = 1; i < rows.length; i++) {
     const rowStr = rows[i];
     if (!rowStr.trim() || rowStr.trim().startsWith("#")) continue;
+    const values = parseCsvRow(rowStr);
+    if (!values.length) continue;
 
-    const values = [];
-    let inQuotes = false;
-    let currentVal = "";
-    for (const char of rowStr) {
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === "," && !inQuotes) {
-        values.push(currentVal);
-        currentVal = "";
-      } else {
-        currentVal += char;
-      }
+    const tableRaw = stripQuotes(values[iTable >= 0 ? iTable : 0]).toLowerCase();
+    const priority = parsePriorityFlag(values[iPriority >= 0 ? iPriority : 1]);
+    const done = parseDoneFlag(values[iDone >= 0 ? iDone : 2]);
+    const dueDate = stripQuotes(values[iDue >= 0 ? iDue : 3]);
+    const shippedDate = stripQuotes(values[iShipped >= 0 ? iShipped : 4]);
+    const wn = stripQuotes(values[iWn >= 0 ? iWn : 5]);
+    const partNo = stripQuotes(values[iPart >= 0 ? iPart : 6]);
+    const qty = parseInt(values[iQty >= 0 ? iQty : 7], 10) || 1;
+
+    if (!partNo) continue;
+    rememberPart(partNo);
+
+    if (tableRaw === "ongoing") {
+      ongoingOrders.push({
+        id: "ord_" + Math.random().toString(36).substr(2, 9),
+        priority,
+        done,
+        statusType: "normal",
+        dueDate,
+        wn,
+        partNo,
+        qty,
+        originalQty: qty,
+      });
+    } else if (tableRaw === "shipped" || tableRaw === "history") {
+      shippedOrders.push({
+        id: "ord_" + Math.random().toString(36).substr(2, 9),
+        priority,
+        statusType: "normal",
+        dueDate,
+        shippedDate: shippedDate || dueDate || new Date().toISOString().split("T")[0],
+        wn,
+        partNo,
+        qty,
+        originalQty: qty,
+        subRecords: null,
+      });
     }
-    values.push(currentVal);
+  }
+}
 
+function processNewFormatCSV(rows) {
+  for (let i = 1; i < rows.length; i++) {
+    const rowStr = rows[i];
+    if (!rowStr.trim() || rowStr.trim().startsWith("#")) continue;
+
+    const values = parseCsvRow(rowStr);
     const tableType = (values[0] || "").trim();
 
-    // Restore known parts appendix
     if (tableType === "KnownPart") {
-      const p = (values[10] || values[6] || "").replace(/^"|"$/g, "").trim();
+      const p = stripQuotes(values[10] || values[6] || "");
       if (p) rememberPart(p);
       continue;
     }
 
     if (values.length < 10) continue;
 
-    const priority = values[1].trim() === "Yes";
-    const status = values[2].trim();
-    const dueDate = values[3].trim();
-    const actDate = values[4].trim();
-    const wn = values[5].replace(/^"|"$/g, "").trim();
-    const partNo = values[6].replace(/^"|"$/g, "").trim();
-    const qty = parseInt(values[7]) || 1;
-    const origQty = parseInt(values[8]) || qty;
-    const eventType = values[9].trim();
+    const priority = parsePriorityFlag(values[1]);
+    const status = (values[2] || "").trim();
+    const dueDate = (values[3] || "").trim();
+    const actDate = (values[4] || "").trim();
+    const wn = stripQuotes(values[5]);
+    const partNo = stripQuotes(values[6]);
+    const qty = parseInt(values[7], 10) || 1;
+    const origQty = parseInt(values[8], 10) || qty;
+    const eventType = (values[9] || "").trim();
 
     if (partNo) rememberPart(partNo);
 
@@ -1308,6 +1402,26 @@ function processCSVContent(content, filename = "OrderTracker") {
         }
       }
     }
+  }
+}
+
+function processCSVContent(content, filename = "OrderTracker") {
+  saveState();
+  importedFileName = filename.replace(/\.[^/.]+$/, "").replace(/_\d{4}-\d{2}-\d{2}_\d{4}$/, "");
+
+  if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
+
+  const rows = content.trim().split(/\r?\n/);
+  if (rows.length <= 1) return;
+
+  ongoingOrders = [];
+  shippedOrders = [];
+
+  const headerCells = parseCsvRow(rows[0]);
+  if (isLegacyCsvHeader(headerCells)) {
+    processLegacyCSV(rows);
+  } else {
+    processNewFormatCSV(rows);
   }
 
   saveData();
