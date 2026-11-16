@@ -269,7 +269,23 @@ html.dark .tracker-table select {
 .btn-scrap { background: #991b1b; box-shadow: 0 3px 0 0 #7f1d1d; }
 .btn-return { background: #2563eb; box-shadow: 0 3px 0 0 #1d4ed8; }
 .btn-delete { background: #dc2626; box-shadow: 0 3px 0 0 #b91c1c; }
-.btn-action:active { transform: translateY(2px); box-shadow: none !important; }
+.no-po-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.35rem;
+  white-space: nowrap;
+}
+html.dark .no-po-badge {
+  color: #fde68a;
+  background: #78350f;
+  border-color: #92400e;
+}
 
 /* Overdue / due-soon rows */
 .overdue-row {
