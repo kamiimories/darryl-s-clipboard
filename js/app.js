@@ -1,4 +1,4 @@
-/* Order Tracking & Shipping Dashboard — logic (v1.9 restyled + auto-CSV / parts / recursive PDF) */
+/* Order Tracking & Shipping Dashboard — logic (v2) */
 
 let ongoingOrders = JSON.parse(localStorage.getItem("ongoingOrders") || "[]");
 let shippedOrders = JSON.parse(localStorage.getItem("shippedOrders") || "[]");
@@ -467,6 +467,19 @@ function deleteOrder(index, isShipped, subIndex = null) {
   render();
 }
 
+function findExistingShipped(order) {
+  // Prefer ID match; fall back to part+due+wn so cross-week partials stay linked
+  let hit = shippedOrders.find((s) => s.id === order.id);
+  if (hit) return hit;
+  return shippedOrders.find(
+    (s) =>
+      s.partNo === order.partNo &&
+      s.dueDate === order.dueDate &&
+      s.wn === order.wn &&
+      s.statusType !== "completed_partial"
+  );
+}
+
 function shipOrder(index) {
   saveState();
   const order = ongoingOrders[index];
@@ -475,15 +488,24 @@ function shipOrder(index) {
   const today = new Date().toISOString().split("T")[0];
   const origTotal = order.originalQty || order.qty;
 
-  let existingRecord = shippedOrders.find((s) => s.id === order.id);
+  let existingRecord = findExistingShipped(order);
 
   if (existingRecord) {
     if (!existingRecord.subRecords) existingRecord.subRecords = [];
+    // If previous full-ship style record, convert to subRecords so history is preserved
+    if (existingRecord.subRecords.length === 0 && existingRecord.qty) {
+      existingRecord.subRecords.push({
+        type: "shipped",
+        date: existingRecord.shippedDate || today,
+        qty: existingRecord.qty,
+      });
+    }
     existingRecord.subRecords.push({ type: "shipped", date: today, qty: order.qty });
     existingRecord.shippedDate = today;
+    existingRecord.id = order.id; // keep IDs aligned
 
     const totalAccounted = existingRecord.subRecords.reduce((acc, s) => acc + s.qty, 0);
-    if (totalAccounted >= existingRecord.originalQty) {
+    if (totalAccounted >= (existingRecord.originalQty || origTotal)) {
       existingRecord.statusType = "completed_partial";
     }
   } else {
@@ -495,6 +517,7 @@ function shipOrder(index) {
       shippedDate: today,
       wn: order.wn,
       partNo: order.partNo,
+      po: order.po || "",
       qty: order.qty,
       originalQty: origTotal,
       subRecords: null,
@@ -527,15 +550,23 @@ function shipPartialOrder(index) {
   saveState();
   const today = new Date().toISOString().split("T")[0];
 
-  let existingRecord = shippedOrders.find((s) => s.id === order.id);
+  let existingRecord = findExistingShipped(order);
 
   if (existingRecord) {
     if (!existingRecord.subRecords) existingRecord.subRecords = [];
+    if (existingRecord.subRecords.length === 0 && existingRecord.qty) {
+      existingRecord.subRecords.push({
+        type: "shipped",
+        date: existingRecord.shippedDate || today,
+        qty: existingRecord.qty,
+      });
+    }
     existingRecord.subRecords.push({ type: "shipped", date: today, qty: parsedQty });
     existingRecord.shippedDate = today;
+    existingRecord.id = order.id;
 
     const totalAccounted = existingRecord.subRecords.reduce((acc, s) => acc + s.qty, 0);
-    if (totalAccounted >= existingRecord.originalQty) {
+    if (totalAccounted >= (existingRecord.originalQty || origTotal)) {
       existingRecord.statusType = "completed_partial";
     } else {
       existingRecord.statusType = "partial";
@@ -573,59 +604,75 @@ function shipPartialOrder(index) {
   render();
 }
 
-function scrapOrder(index) {
+function toggleOngoing() {
+  const body = document.getElementById("ongoingBody");
+  const arrow = document.getElementById("ongoingToggleArrow");
+  if (!body || !arrow) return;
+  const collapsed = body.style.display === "none";
+  body.style.display = collapsed ? "" : "none";
+  arrow.textContent = collapsed ? "▼" : "▶";
+  localStorage.setItem("ongoingCollapsed", collapsed ? "0" : "1");
+}
+
+function showScrapForm(index) {
+  const order = ongoingOrders[index];
+  if (!order) return;
+  const qty = prompt(
+    `Scrap quantity for ${order.partNo} (remaining ${order.qty}):`,
+    order.qty
+  );
+  if (qty === null) return;
+  const parsed = parseInt(qty);
+  if (isNaN(parsed) || parsed <= 0 || parsed > order.qty) {
+    alert("Enter a valid scrap quantity.");
+    return;
+  }
+  const type = prompt("Scrap type (e.g. damage, short, rework):", "damage") || "scrap";
+  // Reuse scrapOrder path but inject type
+  order._pendingScrapType = type;
+  scrapOrder(index, parsed);
+}
+
+function scrapOrder(index, overrideQty) {
   const order = ongoingOrders[index];
   if (!order.id) order.id = "ord_" + Date.now() + Math.random().toString(36).substr(2, 9);
 
   const origTotal = order.originalQty || order.qty;
-  const qtyToScrap = prompt(
-    `Enter quantity to scrap (Remaining: ${order.qty}, Original Total: ${origTotal}):`,
-    order.qty
-  );
-
-  if (qtyToScrap === null) return;
-  const parsedScrap = parseInt(qtyToScrap);
-
-  if (isNaN(parsedScrap) || parsedScrap <= 0 || parsedScrap > order.qty) {
-    alert("Please enter a valid scrap quantity greater than 0 and up to the remaining quantity.");
+  const parsedScrap = overrideQty != null ? overrideQty : parseInt(prompt(`Enter quantity to scrap (Remaining: ${order.qty}, Original Total: ${origTotal}):`, order.qty));
+  if (parsedScrap == null || isNaN(parsedScrap) || parsedScrap <= 0 || parsedScrap > order.qty) {
+    if (overrideQty == null) alert("Please enter a valid scrap quantity greater than 0 and up to the remaining quantity.");
     return;
   }
 
   saveState();
   const today = new Date().toISOString().split("T")[0];
+  const scrapType = order._pendingScrapType || "scrap";
+  delete order._pendingScrapType;
 
-  let existingRecord = shippedOrders.find((s) => s.id === order.id);
+  let existingRecord = findExistingShipped(order);
 
   if (existingRecord) {
     if (!existingRecord.subRecords) existingRecord.subRecords = [];
-    existingRecord.subRecords.push({ type: "scrapped", date: today, qty: parsedScrap });
+    existingRecord.subRecords.push({ type: "scrapped", scrapType, date: today, qty: parsedScrap });
     existingRecord.shippedDate = today;
-
+    existingRecord.id = order.id;
     const totalAccounted = existingRecord.subRecords.reduce((acc, s) => acc + s.qty, 0);
-    if (totalAccounted >= existingRecord.originalQty) {
-      existingRecord.statusType = "completed_partial";
-    } else {
-      existingRecord.statusType = "partial";
-    }
+    existingRecord.statusType = totalAccounted >= (existingRecord.originalQty || origTotal) ? "completed_partial" : "partial";
   } else {
     const initialSubs = [];
     const shippedSoFar = origTotal - order.qty;
-    if (shippedSoFar > 0) {
-      initialSubs.push({ type: "shipped", date: today, qty: shippedSoFar });
-    }
-    initialSubs.push({ type: "scrapped", date: today, qty: parsedScrap });
-
+    if (shippedSoFar > 0) initialSubs.push({ type: "shipped", date: today, qty: shippedSoFar });
+    initialSubs.push({ type: "scrapped", scrapType, date: today, qty: parsedScrap });
     const totalAccounted = initialSubs.reduce((acc, s) => acc + s.qty, 0);
-    const finalStatus = totalAccounted >= origTotal ? "completed_partial" : "partial";
-
     shippedOrders.push({
       id: order.id,
       priority: order.priority,
-      statusType: finalStatus,
+      statusType: totalAccounted >= origTotal ? "completed_partial" : "partial",
       dueDate: order.dueDate,
       shippedDate: today,
       wn: order.wn,
       partNo: order.partNo,
+      po: order.po || "",
       qty: parsedScrap,
       originalQty: origTotal,
       subRecords: initialSubs,
@@ -634,15 +681,70 @@ function scrapOrder(index) {
 
   order.qty -= parsedScrap;
   order.originalQty = origTotal;
-
-  if (order.qty <= 0) {
-    ongoingOrders.splice(index, 1);
-  } else {
-    order.statusType = "partial";
-  }
+  if (order.qty <= 0) ongoingOrders.splice(index, 1);
+  else order.statusType = "partial";
 
   saveData();
   render();
+}
+
+function reviewOrder(index) {
+  const order = shippedOrders[index];
+  if (!order) return;
+  const subs = order.subRecords || [];
+  const shipped = subs.filter((s) => s.type === "shipped");
+  const scrapped = subs.filter((s) => s.type === "scrapped");
+  const shippedQty = shipped.reduce((a, s) => a + s.qty, 0);
+  const scrapQty = scrapped.reduce((a, s) => a + s.qty, 0);
+  let msg = `Order review: ${order.partNo} (${order.wn})\n`;
+  msg += `Original: ${order.originalQty || order.qty}\n`;
+  msg += `Shipped: ${shippedQty} across ${shipped.length} shipment(s)\n`;
+  msg += `Scrapped: ${scrapQty} across ${scrapped.length} scrap event(s)\n\n`;
+  if (shipped.length) {
+    msg += "Shipments:\n";
+    shipped.forEach((s) => (msg += `  ${s.date}: ${s.qty}\n`));
+  }
+  if (scrapped.length) {
+    msg += "Scrap:\n";
+    scrapped.forEach((s) => (msg += `  ${s.date}: ${s.qty} (${s.scrapType || "scrap"})\n`));
+  }
+  alert(msg);
+}
+
+function printBOL() {
+  const today = todayISO();
+  const todayOrders = ongoingOrders.filter((o) => {
+    if (!o.dueDate) return false;
+    return getPreviousBusinessDay(o.dueDate) === today;
+  });
+  if (!todayOrders.length) {
+    alert("No orders scheduled to ship today.");
+    return;
+  }
+  const byWn = { Wolfsteel: [], NAC: [] };
+  todayOrders.forEach((o) => {
+    const key = o.wn === "NAC" ? "NAC" : "Wolfsteel";
+    byWn[key].push(o);
+  });
+  let html = `<!DOCTYPE html><html><head><title>Bill of Lading ${today}</title>
+  <style>body{font-family:Segoe UI,Arial,sans-serif;padding:24px}h2{margin:18px 0 8px}table{border-collapse:collapse;width:100%;margin-bottom:24px}th,td{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#f3f4f6}</style></head><body>
+  <h1>Bill of Lading — ${today}</h1>`;
+  ["Wolfsteel", "NAC"].forEach((wn) => {
+    const list = byWn[wn];
+    if (!list.length) return;
+    html += `<h2>${wn}</h2><table><thead><tr><th>Qty</th><th>Part Number</th><th>PO Number</th></tr></thead><tbody>`;
+    list.forEach((o) => {
+      html += `<tr><td>${o.qty}</td><td>${o.partNo || ""}</td><td>${o.po || ""}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+  });
+  html += `</body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) { alert("Popup blocked. Allow popups to print BOL."); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 250);
 }
 
 function returnOrder(index, subIndex) {
@@ -830,24 +932,41 @@ function getCurrentWeekRange() {
 }
 
 function isShippedThisWeek(order) {
+  // Always show incomplete (partial) records so cross-week orders stay trackable
+  if (order.statusType === "partial") return true;
   const date = order.shippedDate;
   if (!date) return false;
   const { start, end } = getCurrentWeekRange();
   return date >= start && date <= end;
 }
 
+function countShipmentsThisWeek() {
+  const { start, end } = getCurrentWeekRange();
+  let count = 0;
+  shippedOrders.forEach((order) => {
+    if (order.subRecords && order.subRecords.length) {
+      order.subRecords.forEach((sub) => {
+        if (sub.type === "shipped" && sub.date >= start && sub.date <= end) count++;
+      });
+    } else if (order.shippedDate && order.shippedDate >= start && order.shippedDate <= end) {
+      count++;
+    }
+  });
+  return count;
+}
+
 function updateStats() {
   const ongoingCount = ongoingOrders.length;
   const priorityCount = ongoingOrders.filter((o) => o.priority).length;
   const partialCount = ongoingOrders.filter((o) => o.statusType === "partial").length;
-  const shippedCount = shippedOrders.filter((o) => isShippedThisWeek(o)).length;
+  const shipmentsThisWeek = countShipmentsThisWeek();
   const overdueCount = ongoingOrders.filter((o) => getOrderUrgency(o).level === "overdue").length;
 
   const el = (id) => document.getElementById(id);
   if (el("statOngoing")) el("statOngoing").textContent = ongoingCount;
   if (el("statPriority")) el("statPriority").textContent = priorityCount;
   if (el("statPartial")) el("statPartial").textContent = partialCount;
-  if (el("statShipped")) el("statShipped").textContent = shippedCount;
+  if (el("statShipped")) el("statShipped").textContent = shipmentsThisWeek;
   if (el("statOverdue")) el("statOverdue").textContent = overdueCount;
   updateShipByDayStrip();
 }
@@ -955,7 +1074,7 @@ function render() {
           <button class="btn-action btn-partial btn-trendy" onclick="shipPartialOrder(${index})">Partial</button>
         </td>
         <td>
-          <button class="btn-action btn-scrap btn-trendy" onclick="scrapOrder(${index})">Scrap</button>
+          <button class="btn-action btn-scrap btn-trendy" onclick="showScrapForm(${index})">Scrap</button>
         </td>
         <td>
           <button class="btn-action btn-delete btn-trendy" onclick="deleteOrder(${index}, false)">Del</button>
@@ -1069,6 +1188,7 @@ function render() {
               </td>
               <td>
                 <button class="btn-action btn-return btn-trendy" ${hasSubRecords ? 'style="display:none;"' : ""} onclick="event.stopPropagation(); returnOrder(${index}, 0)">Return</button>
+                <button class="btn-action btn-trendy" style="background:#0d9488;box-shadow:0 3px 0 0 #0f766e" onclick="event.stopPropagation(); reviewOrder(${index})">Review</button>
               </td>
               <td>
                 <button class="btn-action btn-delete btn-trendy" onclick="event.stopPropagation(); deleteOrder(${index}, true)">Del</button>

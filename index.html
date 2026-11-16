@@ -107,7 +107,7 @@
                 Order Tracker
               </h1>
               <span class="px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider rounded-full bg-peach-100 text-peach-600 border border-peach-200">
-                v1.9
+                v2
               </span>
             </div>
             <p class="text-xs text-slate-500 font-medium">
@@ -134,10 +134,11 @@
             <span class="toolbar-label">Import CSV</span>
           </button>
 
-          <button onclick="exportCSV()"
-            class="btn-trendy inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-sage-100 text-sage-700 border border-sage-200 shadow-tactile-sage hover:bg-sage-50">
-            <i data-lucide="download" class="w-4 h-4"></i>
-            <span class="toolbar-label">Export CSV</span>
+          <button onclick="printBOL()"
+            class="btn-trendy inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-peach-100 text-peach-700 border border-peach-200 shadow-tactile-peach hover:bg-peach-50"
+            title="Print mock-up Bill of Lading for today's shipments">
+            <i data-lucide="printer" class="w-4 h-4"></i>
+            <span class="toolbar-label">Print BOL</span>
           </button>
 
           <button onclick="linkAutoSaveCsv()"
@@ -228,7 +229,7 @@
       </div>
       <div class="glass-card rounded-2xl p-4 shadow-soft flex items-center justify-between border border-sage-200/80">
         <div>
-          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Shipped this week</p>
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Shipments this week</p>
           <p id="statShipped" class="font-display text-3xl font-extrabold text-sage-700 mt-0.5">0</p>
         </div>
         <div class="w-11 h-11 rounded-2xl bg-sage-100 text-sage-600 flex items-center justify-center shrink-0">
@@ -280,6 +281,11 @@
             class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-lavender-500/40" />
         </div>
         <div>
+          <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">PO #</label>
+          <input id="newPO" type="text" placeholder="PO number"
+            class="w-28 px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-lavender-500/40" />
+        </div>
+        <div>
           <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Qty</label>
           <input type="number" id="newQty" min="1" value="1"
             class="w-20 px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-lavender-500/40" />
@@ -294,13 +300,14 @@
 
     <!-- Ongoing Orders -->
     <section class="glass-card rounded-2xl shadow-soft border border-lavender-200/60 overflow-hidden">
-      <div class="px-5 py-4 border-b border-cream-200/80 flex items-center justify-between">
+      <div class="px-5 py-4 border-b border-cream-200/80 flex items-center justify-between cursor-pointer" onclick="toggleOngoing()">
         <h2 class="font-display font-bold text-lg text-slate-800 flex items-center gap-2">
           <i data-lucide="list-checks" class="w-5 h-5 text-lavender-600"></i>
           Ongoing Orders
+          <span id="ongoingToggleArrow" class="text-sm text-slate-400">▼</span>
         </h2>
       </div>
-      <div class="overflow-x-auto">
+      <div id="ongoingBody" class="overflow-x-auto">
         <table class="tracker-table w-full">
           <thead>
             <tr>
@@ -327,7 +334,7 @@
       <div class="px-5 py-4 border-b border-cream-200/80 flex items-center justify-between">
         <h2 class="font-display font-bold text-lg text-slate-800 flex items-center gap-2">
           <i data-lucide="package-check" class="w-5 h-5 text-sage-600"></i>
-          Shipped this week
+          Shipped & History
         </h2>
       </div>
       <div class="overflow-x-auto">
