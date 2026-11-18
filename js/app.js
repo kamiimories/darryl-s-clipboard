@@ -1,4 +1,4 @@
-/* Order Tracking & Shipping Dashboard — logic (v1.9 restyled + auto-CSV / parts / recursive PDF) */
+/* Order Tracking & Shipping Dashboard — logic v5 */
 
 let ongoingOrders = JSON.parse(localStorage.getItem("ongoingOrders") || "[]");
 let shippedOrders = JSON.parse(localStorage.getItem("shippedOrders") || "[]");
@@ -536,6 +536,8 @@ function shipPartialOrder(index) {
     return;
   }
   saveState();
+  // Copy scrap for the bin, but leave it on the ongoing order so the remainder stays visible
+  const scrapCopy = (order.scrapLog || []).map((s) => ({ ...s }));
   stagingOrders.push({
     id: order.id,
     priority: order.priority,
@@ -545,77 +547,68 @@ function shipPartialOrder(index) {
     po: order.po || "",
     qty: parsedQty,
     originalQty: order.originalQty || order.qty,
-    scrapLog: order.scrapLog || [],
+    scrapLog: scrapCopy,
   });
-  order.scrapLog = [];
   order.qty -= parsedQty;
   order.statusType = "partial";
-  if (order.qty <= 0) ongoingOrders.splice(index, 1);
+  // Only leave ongoing when nothing remains to ship
+  if (order.qty <= 0) {
+    ongoingOrders.splice(index, 1);
+  }
   saveData();
   render();
 }
 
 function confirmShipFromStaging(index) {
-  saveState();
   const item = stagingOrders[index];
   if (!item) return;
   const today = new Date().toISOString().split("T")[0];
-  const fakeOrder = {
+  const scrapSubs = (item.scrapLog || []).map((s) => ({
+    type: "scrapped",
+    scrapType: s.type,
+    date: s.date || today,
+    qty: s.qty,
+  }));
+  // Each bin is its own history row so 38 / 19 / 20 stay 3 shipments
+  const subs = [
+    ...scrapSubs,
+    { type: "shipped", date: today, qty: item.qty },
+  ];
+  shippedOrders.push({
     id: item.id,
+    binId: "bin_" + Date.now() + Math.random().toString(36).substr(2, 6),
     priority: item.priority,
+    statusType: scrapSubs.length ? "completed_partial" : "normal",
     dueDate: item.dueDate,
+    shippedDate: today,
     wn: item.wn,
     partNo: item.partNo,
     po: item.po || "",
     qty: item.qty,
     originalQty: item.originalQty || item.qty,
-  };
-  let existingRecord = findExistingShipped(fakeOrder);
-  if (existingRecord) {
-    if (!existingRecord.subRecords) existingRecord.subRecords = [];
-    if (existingRecord.subRecords.length === 0 && existingRecord.qty) {
-      existingRecord.subRecords.push({ type: "shipped", date: existingRecord.shippedDate || today, qty: existingRecord.qty });
-    }
-    existingRecord.subRecords.push({ type: "shipped", date: today, qty: item.qty });
-    existingRecord.shippedDate = today;
-    existingRecord.po = item.po || existingRecord.po || "";
-    existingRecord.id = item.id;
-    const totalAccounted = existingRecord.subRecords.reduce((acc, s) => acc + s.qty, 0);
-    if (totalAccounted >= (existingRecord.originalQty || item.originalQty || item.qty)) {
-      existingRecord.statusType = "completed_partial";
-    }
-  } else {
-    const scrapSubs = (item.scrapLog || []).map((s) => ({
-      type: "scrapped",
-      scrapType: s.type,
-      date: s.date,
-      qty: s.qty,
-    }));
-    const shipSub = { type: "shipped", date: today, qty: item.qty };
-    const subs = scrapSubs.length ? [...scrapSubs, shipSub] : null;
-    shippedOrders.push({
-      id: item.id,
-      priority: item.priority,
-      statusType: scrapSubs.length ? "completed_partial" : "normal",
-      dueDate: item.dueDate,
-      shippedDate: today,
-      wn: item.wn,
-      partNo: item.partNo,
-      po: item.po || "",
-      qty: item.qty,
-      originalQty: item.originalQty || item.qty,
-      subRecords: subs,
-    });
-  }
+    subRecords: subs,
+  });
   stagingOrders.splice(index, 1);
+}
+
+function shipOneFromStaging(index) {
+  if (!stagingOrders[index]) return;
+  if (!confirm(`Ship this bin (${stagingOrders[index].qty} × ${stagingOrders[index].partNo}) to history?`)) return;
+  saveState();
+  confirmShipFromStaging(index);
   saveData();
   render();
 }
 
 function shipStagingByWn(wn) {
-  const indexes = stagingOrders.map((o, i) => (o.wn === wn ? i : -1)).filter((i) => i >= 0).reverse();
+  const indexes = stagingOrders.map((o, i) => (o.wn === wn ? i : -1)).filter((i) => i >= 0);
   if (!indexes.length) { alert(`Nothing in the queue for ${wn}.`); return; }
-  indexes.forEach((i) => confirmShipFromStaging(i));
+  const total = indexes.reduce((a, i) => a + (stagingOrders[i].qty || 0), 0);
+  if (!confirm(`Ship all ${indexes.length} ${wn} bin(s) (${total} qty) to history?`)) return;
+  saveState();
+  indexes.reverse().forEach((i) => confirmShipFromStaging(i));
+  saveData();
+  render();
 }
 
 function returnFromStaging(index) {
@@ -660,7 +653,7 @@ function renderStaging() {
       <td>${(item.partNo || "").replace(/</g, "<")}</td>
       <td>${(item.po || "").replace(/</g, "<")}</td>
       <td>${item.qty}${(item.scrapLog || []).reduce((a, s) => a + (s.qty || 0), 0) ? `<div class="text-[11px] font-bold text-rose-600">scrap ${(item.scrapLog || []).reduce((a, s) => a + (s.qty || 0), 0)}</div>` : ""}</td>
-      <td><button class="btn-action btn-ship btn-trendy" onclick="confirmShipFromStaging(${index})">Ship</button></td>
+      <td><button class="btn-action btn-ship btn-trendy" onclick="shipOneFromStaging(${index})">Ship</button></td>
       <td><button class="btn-action btn-return btn-trendy" onclick="returnFromStaging(${index})">Return</button></td>
     </tr>`).join("");
 }
@@ -673,15 +666,22 @@ function printBOL() {
     alert("Shipping queue is empty. Stage orders first.");
     return;
   }
+  const grouped = {};
+  stagingOrders.forEach((o) => {
+    const wn = o.wn === "NAC" ? "NAC" : "Wolfsteel";
+    const key = `${wn}|${(o.partNo || "").trim()}|${(o.po || "").trim()}`;
+    if (!grouped[key]) grouped[key] = { wn, partNo: o.partNo || "", po: o.po || "", qty: 0 };
+    grouped[key].qty += o.qty || 0;
+  });
   const byWn = { Wolfsteel: [], NAC: [] };
-  stagingOrders.forEach((o) => byWn[o.wn === "NAC" ? "NAC" : "Wolfsteel"].push(o));
+  Object.values(grouped).forEach((g) => byWn[g.wn].push(g));
   let html = "";
   ["Wolfsteel", "NAC"].forEach((wn) => {
     const list = byWn[wn];
     if (!list.length) return;
     html += `<div><div class="font-display font-extrabold text-base text-slate-900 mb-1">${wn}</div>`;
     list.forEach((o) => {
-      html += `<div>${o.qty} &nbsp; ${o.partNo || ""} &nbsp; ${o.po || ""}</div>`;
+      html += `<div>${o.qty} &nbsp; ${o.partNo} &nbsp; ${o.po}</div>`;
     });
     html += `</div>`;
   });
@@ -1230,6 +1230,7 @@ function render() {
           const scrapHtml = scrapTotal > 0
             ? `<div class="text-[11px] font-bold text-rose-600 mt-0.5">scrap ${scrapTotal}</div>`
             : "";
+          const uniqueSubId = `sub_${index}`;
           const isSubOpen = expandedEntries[uniqueSubId];
           const subArrow = isSubOpen ? "▼" : "▶";
 
@@ -1343,6 +1344,7 @@ function generateCSVString() {
             sub.qty,
             order.originalQty,
             sub.type === "scrapped" ? "Scrap" : "Partial Shipment",
+            `"${(order.po || "").replace(/"/g, '""')}"`,
           ].join(",") + "\n";
       });
     } else {
@@ -1524,6 +1526,11 @@ function processLegacyCSV(rows) {
 }
 
 function processNewFormatCSV(rows) {
+  const header = parseCsvRow(rows[0]).map((c) => stripQuotes(c).toLowerCase());
+  const col = (name) => header.indexOf(name);
+  const iPo = col("po");
+  const iEvent = col("event type");
+
   for (let i = 1; i < rows.length; i++) {
     const rowStr = rows[i];
     if (!rowStr.trim() || rowStr.trim().startsWith("#")) continue;
@@ -1532,12 +1539,12 @@ function processNewFormatCSV(rows) {
     const tableType = (values[0] || "").trim();
 
     if (tableType === "KnownPart") {
-      const p = stripQuotes(values[10] || values[6] || "");
+      const p = stripQuotes(values[iPo >= 0 ? iPo : 10] || values[6] || "");
       if (p) rememberPart(p);
       continue;
     }
 
-    if (values.length < 10) continue;
+    if (values.length < 8) continue;
 
     const priority = parsePriorityFlag(values[1]);
     const status = (values[2] || "").trim();
@@ -1547,14 +1554,14 @@ function processNewFormatCSV(rows) {
     const partNo = stripQuotes(values[6]);
     const qty = parseInt(values[7], 10) || 1;
     const origQty = parseInt(values[8], 10) || qty;
-    const eventType = (values[9] || "").trim();
-    const po = stripQuotes(values[10] || "");
+    const eventType = (values[iEvent >= 0 ? iEvent : 9] || "").trim();
+    const po = stripQuotes(iPo >= 0 ? values[iPo] : values[10] || "");
 
     if (partNo) rememberPart(partNo);
 
     if (tableType === "Ongoing") {
       ongoingOrders.push({
-        id: "ord_" + Math.random().toString(36).substr(2, 9),
+        id: "ord_" + Date.now() + Math.random().toString(36).substr(2, 9),
         priority,
         done: false,
         statusType: status === "Partial" ? "partial" : "normal",
@@ -1579,7 +1586,7 @@ function processNewFormatCSV(rows) {
 
       if (eventType === "Full Ship") {
         shippedOrders.push({
-          id: "ord_" + Math.random().toString(36).substr(2, 9),
+          id: "ord_" + Date.now() + Math.random().toString(36).substr(2, 9),
           priority,
           statusType: "normal",
           dueDate,
@@ -1591,25 +1598,25 @@ function processNewFormatCSV(rows) {
           originalQty: origQty,
           subRecords: null,
         });
+      } else if (existing) {
+        if (!existing.subRecords) existing.subRecords = [];
+        existing.subRecords.push(subItem);
+        if (origQty > existing.originalQty) existing.originalQty = origQty;
+        if (po && !existing.po) existing.po = po;
       } else {
-        if (existing) {
-          if (!existing.subRecords) existing.subRecords = [];
-          existing.subRecords.push(subItem);
-          if (origQty > existing.originalQty) existing.originalQty = origQty;
-        } else {
-          shippedOrders.push({
-            id: "ord_" + Math.random().toString(36).substr(2, 9),
-            priority,
-            statusType: status.includes("Completed") ? "completed_partial" : "partial",
-            dueDate,
-            shippedDate: actDate,
-            wn,
-            partNo,
-            qty: origQty,
-            originalQty: origQty,
-            subRecords: [subItem],
-          });
-        }
+        shippedOrders.push({
+          id: "ord_" + Date.now() + Math.random().toString(36).substr(2, 9),
+          priority,
+          statusType: status.includes("Completed") ? "completed_partial" : "partial",
+          dueDate,
+          shippedDate: actDate,
+          wn,
+          partNo,
+          po,
+          qty: origQty,
+          originalQty: origQty,
+          subRecords: [subItem],
+        });
       }
     }
   }

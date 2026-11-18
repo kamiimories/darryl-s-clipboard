@@ -209,14 +209,17 @@ html.dark #pdfStatus { color: #2dd4bf; }
 html.dark .clickable-row:hover { background-color: rgba(255, 255, 255, 0.04); }
 
 /* Compact table cells */
+.tracker-table {
+  min-width: 980px;
+}
 .tracker-table th {
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   font-weight: 800;
   color: #64748b;
   background: rgba(248, 244, 236, 0.9);
-  padding: 0.65rem 0.6rem;
+  padding: 0.5rem 0.45rem;
   white-space: nowrap;
 }
 html.dark .tracker-table th {
@@ -224,10 +227,10 @@ html.dark .tracker-table th {
   color: #a8a6b8;
 }
 .tracker-table td {
-  padding: 0.55rem 0.6rem;
+  padding: 0.4rem 0.45rem;
   vertical-align: middle;
   border-bottom: 1px solid rgba(226, 232, 240, 0.8);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
 }
 html.dark .tracker-table td {
   border-bottom-color: #2a2a38;
